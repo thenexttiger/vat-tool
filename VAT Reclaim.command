@@ -1,15 +1,17 @@
 #!/bin/bash
 # Amazon fee VAT reclaim, start to finish, in one double-click:
-#   asks which quarter -> puts the download script on your clipboard and opens
-#   Seller Central -> waits while the invoice PDFs download -> reads them ->
-#   prints the VAT to reclaim and shows the accountant zip in Finder.
+#   updates itself -> sets itself up -> opens the VAT Reclaim page in the browser
+#   (vat_app.py), where you type the period, open Seller Central, read the
+#   invoices and get the accountant zip.
+# VAT_TERMINAL=1 runs the older all-in-Terminal version of the same steps.
+# VAT_HEADLESS=1 (set by the VAT Reclaim app) means no Terminal window is showing.
 # The first run also sets up its own Python environment (nothing to install by
 # hand on a Mac that has Xcode's command line tools or Homebrew Python).
 
 cd "$(dirname "$0")" || exit 1
 DL="${VAT_DOWNLOADS:-$HOME/Downloads}"      # override only for testing
 
-pause() { echo ""; read -n1 -r -p "Press any key to close..."; echo ""; }
+pause() { [ -n "$VAT_HEADLESS" ] && return 0; echo ""; read -n1 -r -p "Press any key to close..."; echo ""; }
 
 echo "======================================================"
 echo "  Amazon fee VAT reclaim"
@@ -61,13 +63,24 @@ make_app() {
     [ -w "$dir" ] || return 0
     app="$dir/VAT Reclaim.app"
     if [ -x "$app/Contents/MacOS/VATReclaim" ] && grep -qF "\"$here\"" "$app/Contents/MacOS/VATReclaim" \
+       && grep -q "returns once the page is up" "$app/Contents/MacOS/VATReclaim" \
        && [ ! icon.png -nt "$app/Contents/Resources/icon.icns" ]; then
         return 0
     fi
     local fresh=1; [ -d "$app" ] && fresh=0
     rm -rf "$app"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" || return 0
-    printf '#!/bin/bash\nopen -a Terminal "%s"\n' "$here" > "$app/Contents/MacOS/VATReclaim"
+    cat > "$app/Contents/MacOS/VATReclaim" <<APPSH
+#!/bin/bash
+# Opens VAT Reclaim in the browser with no Terminal window. The first-time
+# setup (or a Mac without Apple's developer tools) is shown in Terminal instead.
+cd "$PWD" || exit 1
+if [ -x venv/bin/python ] && xcode-select -p >/dev/null 2>&1; then
+    VAT_HEADLESS=1 /bin/bash "$here" >/dev/null 2>&1    # returns once the page is up
+else
+    open -a Terminal "$here"
+fi
+APPSH
     chmod +x "$app/Contents/MacOS/VATReclaim"
     cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -121,6 +134,24 @@ if [ ! -x "venv/bin/python" ] || [ requirements.txt -nt venv/.installed ]; then
     touch venv/.installed
     echo "Setup complete."
     echo ""
+fi
+
+# --- The page in the browser (the normal way). ---
+if [ -z "$VAT_TERMINAL" ] && [ -f vat_app.py ]; then
+    if [ -n "$NEW_APP" ] && [ -z "$VAT_NO_OPEN" ]; then open -R "$NEW_APP" 2>/dev/null; fi
+    nohup ./venv/bin/python vat_app.py >/dev/null 2>&1 &
+    disown 2>/dev/null
+    if [ -z "$VAT_HEADLESS" ]; then
+        echo "VAT Reclaim is opening in your browser."
+        if [ -n "$NEW_APP" ]; then
+            echo ""
+            echo "New: a \"VAT Reclaim\" app is now in your Applications (showing in Finder)."
+            echo "Drag it into your Dock and open the tool from there next time."
+        fi
+        echo ""
+        echo "You can close this window."
+    fi
+    exit 0
 fi
 
 if [ -n "$NEW_APP" ]; then

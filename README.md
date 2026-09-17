@@ -5,18 +5,23 @@ straight from Amazon's own invoice PDFs, and packs them up for your accountant.
 
 ## How to run it
 
-1. Double-click **`VAT Reclaim.command`**.
-2. Type the VAT period (for example `Q3 2026` or `Jun-Aug 2026`) and press Enter.
-3. Seller Central opens in your browser. Log in if asked, and check the account
+1. Open **VAT Reclaim** (the app in your Dock or Applications; or double-click
+   `VAT Reclaim.command`). A page opens in your browser. No Terminal needed.
+2. Type the VAT period (for example `Q3 2026` or `Jun-Aug 2026`) and press
+   **Open Seller Central**.
+3. Seller Central opens in another tab. Log in if asked, and check the account
    name at the top right is the right one.
 4. On that page press `Cmd+Option+J`. A panel opens. Click in it, press `Cmd+V`,
    then `Enter`.
-5. Wait about 3 minutes. A box at the top right of the page shows progress and
-   turns green with `=== DONE ===` when finished.
-6. Go back to the tool's window and press any key.
+5. Wait. A box at the top right of the page counts the downloads and turns green
+   with `=== DONE ===` when finished (about 2 seconds per invoice).
+6. Go back to the VAT Reclaim tab and press **Read the invoices**.
 
 It shows the **VAT to reclaim** and opens Finder on the zip file. Send that zip
-to the accountant.
+to the accountant. The page itself lists these steps as you go.
+
+(The older all-in-Terminal version still exists for troubleshooting:
+`VAT_TERMINAL=1 ./VAT\ Reclaim.command`.)
 
 **When to run it:** after the period has ended, from about the 5th of the next
 month (Amazon issues each month's invoice a few days late).
@@ -91,14 +96,16 @@ not reclaimable on a UK return.
    If a window offers to install Apple's "command line developer tools", click
    **Install**, wait for it to finish (5 to 10 minutes), then paste the line again.
 3. A folder opens. Double-click **`VAT Reclaim.command`**. The first run sets
-   itself up (a minute or two).
+   itself up in a Terminal window (a minute or two), then opens the tool's page
+   in the browser.
 
 From then on, every time the tool is opened it first fetches the latest version
 by itself. No internet? It just runs the version it has.
 
 The first run also makes a **VAT Reclaim** app in Applications and shows it in
 Finder. Drag that app into the Dock and open the tool from there from now on
-(it is in Launchpad and Spotlight too). Don't move or rename the `vat-tool`
+(it is in Launchpad and Spotlight too); the app opens the page directly, with
+no Terminal window. Don't move or rename the `vat-tool`
 folder afterwards; if you do, double-click `VAT Reclaim.command` once and the
 app fixes itself.
 
