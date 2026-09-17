@@ -36,6 +36,18 @@ if [ -d .git ] && [ -z "$VAT_UPDATED" ] && xcode-select -p >/dev/null 2>&1; then
     fi
 fi
 
+# --- 0b. Icon: macOS keeps a file's custom icon outside its contents, so git
+#      can't carry it. Put it on (again) whenever it is missing.
+if [ -f icon.png ] && ! xattr -p com.apple.FinderInfo "$0" >/dev/null 2>&1; then
+    osascript -l JavaScript - "$PWD/icon.png" "$PWD/$(basename "$0")" >/dev/null 2>&1 <<'JXA'
+function run(argv) {
+    ObjC.import('AppKit');
+    var img = $.NSImage.alloc.initWithContentsOfFile(argv[0]);
+    $.NSWorkspace.sharedWorkspace.setIconForFileOptions(img, argv[1], 0);
+}
+JXA
+fi
+
 # --- 0. Python: use whatever the Mac has; offer Apple's installer if none ---
 PY=""
 for c in python3.13 python3.12 python3.11 python3; do
