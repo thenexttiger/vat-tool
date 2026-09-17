@@ -174,8 +174,10 @@ if [ ${#ALL_FEE[@]} -eq 0 ]; then
     pause; exit 0
 fi
 mkdir -p vat_inputs
-rm -f vat_inputs/*.pdf
+rm -f vat_inputs/*.pdf vat_inputs/vat_manifest_*.txt
 cp -p "${ALL_FEE[@]}" vat_inputs/
+# the download checklist(s) the browser script saved, so dropped downloads get noticed
+MAN=("$DL"/vat_manifest_*.txt); [ ${#MAN[@]} -gt 0 ] && cp -p "${MAN[@]}" vat_inputs/
 echo "Step 2 of 2: reading ${#ALL_FEE[@]} invoice PDF(s)..."
 echo ""
 OUT=$(./venv/bin/python vat_fee_summariser.py vat_inputs/ --period "$Q" --zip-dir vat_inputs --since "$STARTED" 2>&1)

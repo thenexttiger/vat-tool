@@ -44,6 +44,11 @@ import pdfplumber
 # Amazon's UK VAT number — every reclaimable fee invoice should carry this as
 # the supplier. A different supplier VAT is a flag (not necessarily UK-input).
 AMAZON_UK_VAT = "GB727255821"
+# the supplier-name label that follows the customer's name on the same line
+# (de, es, it, nl, sv, plus en/fr/pl in case Amazon moves them onto one line too)
+SUPPLIER_LABEL_RE = re.compile(
+    r"\s*(?:Leistungserbringer|Nombre del proveedor|Nome(?: del)? fornitore|Dienstverlener|"
+    r"Leverantörsnamn|Supplier Name|Nom du fournisseur|Nazwa dostawcy)\s*:\s*$", re.I)
 
 # Invoice-number shapes we care about (UK input VAT). Non-GB marketplaces
 # (SA-*, AE-*) are foreign VAT and not reclaimable here, so they're ignored.
@@ -267,27 +272,41 @@ def parse_invoice_text(text, name):
     gb = [x for x in re.findall(r"\bGB\d{9}\b", text) if x != AMAZON_UK_VAT]
     if gb:
         r["business_vat"] = gb[0]
+    # Two layouts. English/French/Polish: the name has its own line just above
+    # "Amazon EU S...". German/Spanish/Italian/Dutch/Swedish: the name shares a
+    # line with the supplier label ("CSY LTD Leistungserbringer:") above it.
+    # Anything with a colon left in it is a label, never a name.
     tl = [ln.strip() for ln in text.split("\n")]
     for i, ln in enumerate(tl):
         if "Amazon EU S" in ln:
-            prefix = ln.split("Amazon EU S")[0].strip()
-            if prefix and not prefix.endswith(":"):
-                r["business_name"] = prefix
-            else:
-                for prev in reversed(tl[:i]):
-                    if prev and not prev.endswith(":"):
-                        r["business_name"] = prev
-                        break
+            cand = ln.split("Amazon EU S")[0].strip()
+            if not cand or cand.endswith(":"):
+                cand = tl[i - 1] if i else ""
+                cand = SUPPLIER_LABEL_RE.sub("", cand).strip()
+            if cand and ":" not in cand and not re.search(r"GB-(?:CN-)?AEU-", cand):
+                r["business_name"] = cand
             break
 
-    # --- Supplier VAT sanity ---
-    m = re.search(r"Supplier VAT Number:\s*([A-Z]{2}\d+)", text)
-    if m:
-        r["supplier_vat"] = m.group(1)
-        if m.group(1) != AMAZON_UK_VAT:
-            r["issues"].append(
-                f"WARNING: {name}: supplier VAT {m.group(1)} != Amazon UK "
-                f"{AMAZON_UK_VAT} — confirm this is UK-reclaimable")
+    # --- Is this UK VAT? Works in any language: Amazon's UK VAT number must be
+    #     on the page, and every VAT rate printed must be the UK's 20% (or 0%).
+    #     A 19/21/22/23/25% line would be another country's VAT, which a UK
+    #     return cannot reclaim. ---
+    squashed = text.replace(" ", "")
+    if AMAZON_UK_VAT in squashed:
+        r["supplier_vat"] = AMAZON_UK_VAT
+    else:
+        m = re.search(r"Supplier VAT Number:\s*([A-Z]{2}\d+)", text)
+        r["supplier_vat"] = m.group(1) if m else None
+        r["issues"].append(
+            f"WARNING: {name}: Amazon's UK VAT number ({AMAZON_UK_VAT}) is not on this document"
+            + (f" (supplier shown: {m.group(1)})" if m else "")
+            + "; confirm it is UK VAT before reclaiming")
+    rates = {float(x.replace(",", ".")) for x in re.findall(r"(\d{1,2}(?:[.,]\d+)?)\s*%", text)}
+    foreign = sorted(x for x in rates if x not in (0.0, 20.0))
+    if foreign:
+        r["issues"].append(
+            f"WARNING: {name}: VAT rate {', '.join(f'{x:g}%' for x in foreign)} is not the UK's 20%; "
+            f"this may be another country's VAT and not reclaimable on a UK return")
 
     # --- Exchange rate (present on non-GBP invoices) ---
     em = EXRATE_RE.search(text)
@@ -350,7 +369,10 @@ def _self_check(r):
     #    false-flagging zero-rated fees or mixed-rate invoices.
     if net not in (None, 0) and vat is not None:
         implied = vat / net
-        if implied < -0.01 or implied > 0.30:
+        # tiny documents round to odd-looking rates (0.01 on 0.03 is "33%"): fine
+        # whenever the VAT is within a penny of 20% or of nothing
+        rounding = min(abs(abs(vat) - abs(net) * 0.20), abs(vat)) <= 0.011
+        if (implied < -0.01 or implied > 0.30) and not rounding:
             r["issues"].append(
                 f"WARNING: {name}: implied VAT rate {implied*100:.0f}% not plausible "
                 f"(net {net:.2f}, VAT {vat:.2f})")
@@ -411,32 +433,66 @@ def summarise(folder, zip_path=None, quarter=None, zip_dir=None, since=None):
         if current and current != set(groups):
             for k in sorted(set(groups) - current):
                 docs = groups.pop(k)
-                who = next((d["business_name"] for d in docs if d["business_name"]), k)
+                names = [d["business_name"] for d in docs if d["business_name"]]
+                who = max(set(names), key=names.count) if names else k
                 print(f"Set aside: {len(docs)} older PDF(s) in Downloads billed to {who}, "
                       f"not downloaded in this run. Run the tool on that account to report it.")
             print("")
 
+    # The browser script leaves a checklist of the invoice numbers it set out to
+    # download (vat_manifest_*.txt). Newest one for this period wins; any number
+    # on it with no PDF here is reported, so a dropped download is never silent.
+    missing_by_group = {}
+    if quarter is not None:
+        want = "VAT-MANIFEST %04d-%02d %04d-%02d" % (quarter[0] // 12, quarter[0] % 12 + 1,
+                                                       quarter[1] // 12, quarter[1] % 12 + 1)
+        best = None
+        for f in os.listdir(folder):
+            if f.startswith("vat_manifest_") and f.endswith(".txt"):
+                fp = os.path.join(folder, f)
+                try:
+                    lines = open(fp, encoding="utf-8").read().split()
+                except OSError:
+                    continue
+                if " ".join(lines[:3]) == want and (since is None or os.path.getmtime(fp) >= since):
+                    if best is None or os.path.getmtime(fp) > best[0]:
+                        best = (os.path.getmtime(fp), [n for n in lines[3:] if re.fullmatch(r"GB-(?:CN-)?AEU-\d{4}-\d+", n)])
+        if best:
+            have = {p["number"]: k for k, docs in groups.items() for p in docs if p["number"]}
+            have.update({p["number"]: None for p in skipped if p.get("number")})
+            missing = [n for n in best[1] if n not in have]
+            if missing and groups:
+                owners = [have[n] for n in best[1] if have.get(n)]
+                owner = max(set(owners), key=owners.count) if owners else sorted(groups)[0]
+                missing_by_group[owner] = missing
+
     results = []
     for key in sorted(groups):
         docs = groups[key]
-        name = next((d["business_name"] for d in docs if d["business_name"]), None)
+        names = [d["business_name"] for d in docs if d["business_name"]]
+        name = max(set(names), key=names.count) if names else None
         vat = next((d["business_vat"] for d in docs if d["business_vat"]), None)
         label = " ".join(x for x in (name, f"({vat})" if vat else None) if x) or key
         if len(groups) > 1:
             print("\n" + "#" * 70 + f"\n# {label}\n" + "#" * 70 + "\n")
         results.append(_report(folder, docs, skipped, zip_path if len(groups) == 1 else None,
                                quarter, zip_dir or (os.path.dirname(zip_path) if zip_path else None),
-                               label, name or vat or key))
+                               label, name or vat or key, missing_by_group.get(key)))
     return results
 
 
-def _report(folder, parsed, skipped, zip_path, quarter, zip_dir, business, business_slug):
+def _report(folder, parsed, skipped, zip_path, quarter, zip_dir, business, business_slug, not_downloaded=None):
 
     # Deduplicate by invoice number. The same invoice appearing twice — e.g. a
     # "GB-AEU-...(1).pdf" re-download, or Amazon reissuing under the same number —
     # would double-count its VAT. Keep the first, and warn loudly on the rest so
     # a duplicate can never silently inflate the reclaim.
     extra_issues = []
+    if not_downloaded:
+        shown = ", ".join(not_downloaded[:8]) + (f" and {len(not_downloaded) - 8} more" if len(not_downloaded) > 8 else "")
+        extra_issues.append(
+            f"CRITICAL: {len(not_downloaded)} invoice(s) on Amazon's list did not reach Downloads: {shown}. "
+            f"Run the tool again for the same period; it will fetch them and this clears.")
     used, seen_numbers = [], {}
     for p in parsed:
         if p["skip"]:

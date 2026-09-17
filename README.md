@@ -63,6 +63,13 @@ in the summary) and never mixes two businesses in one figure or zip.
 - **RED**: an invoice couldn't be read; the total is incomplete. Don't rely on
   it until that invoice is sorted.
 
+**Built-in checks.** Every document must carry Amazon's UK VAT number and only
+UK rates (20% or 0%), in whatever language it is written; anything else is
+flagged as possibly another country's VAT. The download also saves a small
+checklist file (`vat_manifest_...txt`) listing every invoice it set out to
+fetch; if a PDF on that list never arrived, the result goes RED and names it.
+Just run the tool again for the same period.
+
 Old PDFs left in Downloads don't matter: every document's own invoice period
 decides which period it belongs to, and anything outside the chosen period is
 listed under "Left out" and excluded.

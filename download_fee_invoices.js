@@ -314,6 +314,22 @@ const DOWNLOAD_DELAY = 4000;
         await sleep(DOWNLOAD_DELAY);
     }
 
+    // --- Checklist for the summariser: the invoice numbers this run set out to
+    //     download, saved as a small text file beside the PDFs. The summariser
+    //     compares it with the PDFs it finds, so a download Chrome dropped
+    //     can't quietly shrink the reclaim. Harmless if it can't be saved. ---
+    if (!window.__VAT_DRY_RUN) {
+        try {
+            const ym = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            const body = `VAT-MANIFEST ${ym(startDate)} ${ym(endDate)}\n` + targets.map(t => t.number).join('\n') + '\n';
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([body], { type: 'text/plain' }));
+            a.download = `vat_manifest_${ym(startDate)}_${ym(endDate)}.txt`;
+            document.body.appendChild(a); a.click(); a.remove();
+            await sleep(1500);
+        } catch (e) { console.log('Could not save the checklist file (not a problem):', e); }
+    }
+
     // --- Coverage report ---
     console.log(`\n=== DONE === ${downloaded} UK invoice PDF(s) downloaded for the quarter.`);
     status(window.__VAT_DRY_RUN ? `Test only: ${targets.length} invoice(s) would download.`
