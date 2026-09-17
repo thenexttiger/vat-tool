@@ -54,7 +54,7 @@ fi
 if [ ! -x "venv/bin/python" ] || [ requirements.txt -nt venv/.installed ]; then
     echo "First run: setting things up (one time, about a minute)..."
     [ -x venv/bin/python ] || "$PY" -m venv venv || { echo "Setup failed (venv)."; pause; exit 1; }
-    ./venv/bin/pip install -q -r requirements.txt || { echo "Setup failed (packages)."; pause; exit 1; }
+    ./venv/bin/pip install -q --disable-pip-version-check -r requirements.txt || { echo "Setup failed (packages)."; pause; exit 1; }
     touch venv/.installed
     echo "Setup complete."
     echo ""
