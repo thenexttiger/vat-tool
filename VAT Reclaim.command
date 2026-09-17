@@ -48,6 +48,57 @@ function run(argv) {
 JXA
 fi
 
+# --- 0c. A real app for the Dock: macOS won't always take a script file in the
+#      Dock, so build a tiny "VAT Reclaim" app that just opens this file. Goes in
+#      Applications (or the user's own Applications folder), so it is also in
+#      Launchpad and Spotlight. Rebuilt if missing, moved, or the icon changed.
+make_app() {
+    local here="$PWD/$(basename "$0")" dir app
+    for dir in ${VAT_APP_DIR:+"$VAT_APP_DIR"} "/Applications" "$HOME/Applications"; do   # VAT_APP_DIR: testing only
+        mkdir -p "$dir" 2>/dev/null
+        [ -w "$dir" ] && break
+    done
+    [ -w "$dir" ] || return 0
+    app="$dir/VAT Reclaim.app"
+    if [ -x "$app/Contents/MacOS/VATReclaim" ] && grep -qF "\"$here\"" "$app/Contents/MacOS/VATReclaim" \
+       && [ ! icon.png -nt "$app/Contents/Resources/icon.icns" ]; then
+        return 0
+    fi
+    local fresh=1; [ -d "$app" ] && fresh=0
+    rm -rf "$app"
+    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" || return 0
+    printf '#!/bin/bash\nopen -a Terminal "%s"\n' "$here" > "$app/Contents/MacOS/VATReclaim"
+    chmod +x "$app/Contents/MacOS/VATReclaim"
+    cat > "$app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>VAT Reclaim</string>
+  <key>CFBundleDisplayName</key><string>VAT Reclaim</string>
+  <key>CFBundleIdentifier</key><string>com.thenexttiger.vatreclaim</string>
+  <key>CFBundleExecutable</key><string>VATReclaim</string>
+  <key>CFBundleIconFile</key><string>icon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>LSUIElement</key><true/>
+</dict></plist>
+PLIST
+    if [ -f icon.png ]; then
+        local set; set="$(mktemp -d)/icon.iconset"; mkdir -p "$set"
+        for sz in 16 32 128 256 512; do
+            sips -z $sz $sz icon.png --out "$set/icon_${sz}x${sz}.png" >/dev/null 2>&1
+            sips -z $((sz*2)) $((sz*2)) icon.png --out "$set/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1
+        done
+        iconutil -c icns "$set" -o "$app/Contents/Resources/icon.icns" 2>/dev/null
+    fi
+    touch "$app"
+    if [ "$fresh" = 1 ]; then
+        NEW_APP="$app"
+    fi
+}
+NEW_APP=""
+[ -z "$VAT_NO_APP" ] && make_app
+
 # --- 0. Python: use whatever the Mac has; offer Apple's installer if none ---
 PY=""
 for c in python3.13 python3.12 python3.11 python3; do
@@ -70,6 +121,13 @@ if [ ! -x "venv/bin/python" ] || [ requirements.txt -nt venv/.installed ]; then
     touch venv/.installed
     echo "Setup complete."
     echo ""
+fi
+
+if [ -n "$NEW_APP" ]; then
+    echo "New: a \"VAT Reclaim\" app is now in your Applications (it is showing in Finder)."
+    echo "Drag it into your Dock. From now on, open the tool from there."
+    echo ""
+    open -R "$NEW_APP" 2>/dev/null
 fi
 
 # --- 1. Which VAT period? Default = the calendar quarter that ended most recently ---

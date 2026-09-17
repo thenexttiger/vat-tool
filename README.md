@@ -89,6 +89,10 @@ not reclaimable on a UK return.
 From then on, every time the tool is opened it first fetches the latest version
 by itself. No internet? It just runs the version it has.
 
-Tip: drag `VAT Reclaim.command` to the right-hand side of the Dock to keep it handy.
+The first run also makes a **VAT Reclaim** app in Applications and shows it in
+Finder. Drag that app into the Dock and open the tool from there from now on
+(it is in Launchpad and Spotlight too). Don't move or rename the `vat-tool`
+folder afterwards; if you do, double-click `VAT Reclaim.command` once and the
+app fixes itself.
 
 The browser on that Mac must be logged into the right Seller Central account.
