@@ -71,12 +71,13 @@ def do_start(text):
     label, rng = parse_period(text)
     if not label:
         save_state(error=f"Couldn't read the period “{text}”. Try  Q3 2026  or  Jun-Aug 2026.")
-        return
+        return None
     js = open(os.path.join(HERE, "download_fee_invoices.js"), encoding="utf-8").read().replace("__QUARTER__", rng)
     subprocess.run(["pbcopy"], input=js.encode("utf-8"))
-    if not os.environ.get("VAT_NO_OPEN"):
-        subprocess.Popen(["open", f"{SELLER_URL}#vat={rng}"])
     save_state(period=label, started=label, started_at=time.time(), result=None, error=None)
+    # The browser opens this itself (in a new tab of the same window), so Seller Central appears in whichever
+    # window the page is in: an incognito window stays incognito and keeps that window's Amazon login.
+    return f"{SELLER_URL}#vat={rng}"
 
 
 def do_read():
@@ -166,7 +167,7 @@ def page():
          "<p>Works out the VAT to reclaim on Amazon's fees and packs the invoices for the accountant.</p></div></header>"]
 
     h.append(f"""<div class=card><h2><span class=n>1</span>Which VAT period?</h2>
-<form method=post action=/start class=row>
+<form method=post action=/start class=row target=_blank onsubmit="setTimeout(function(){{location.reload()}},1200)">
 <input type=text name=period value="{esc(period)}" required autofocus>
 <button type=submit>Open Seller Central</button></form>
 <p class=hint style="margin:10px 0 0">Examples: <b>Q3 2026</b> · <b>Jun-Aug 2026</b> · <b>Dec-Feb 2026</b> · <b>Aug 2026</b></p>
@@ -189,8 +190,8 @@ older invoices for another account left in Downloads are set aside, never mixed 
 <li>Come back to this tab and press the button.</li></ol>
 <form method=post action=/read onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Reading the invoices… up to a minute or two'">
 <button type=submit>Read the invoices</button>
-<span class=hint>&nbsp; Nothing happened in Seller Central? <a href="#" onclick="document.getElementById('again').submit();return false">Open it again</a></span></form>
-<form id=again method=post action=/start style="display:none"><input name=period value="{esc(started)}"></form></div>""")
+<span class=hint>&nbsp; Nothing happened in Seller Central? <a href="#" onclick="document.getElementById('again').submit();return false">Open it again</a> (opens in this browser window)</span></form>
+<form id=again method=post action=/start target=_blank onsubmit="return true" style="display:none"><input name=period value="{esc(started)}"></form></div>""")
     elif not result:
         h.append("<div class='card dim'><h2><span class=n>2</span>Download the invoices</h2><p class=hint style='margin:0'>The steps appear here after step 1.</p></div>")
 
@@ -280,7 +281,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         form = self._form()
         if self.path == "/start":
-            do_start((form.get("period") or [""])[0].strip())
+            # This request arrives in the new tab the form opened (target=_blank). Send that tab on to Seller Central,
+            # or close it again if the period could not be read (the original tab reloads and shows the error).
+            dest = do_start((form.get("period") or [""])[0].strip())
+            if dest:
+                self._send(200, (f"<!doctype html><meta charset=utf-8><meta http-equiv=refresh content='0;url={esc(dest)}'>"
+                                 f"<script>location.replace({json.dumps(dest)})</script>"
+                                 f"<p style='font:16px -apple-system;padding:40px'>Opening Seller Central… <a href='{esc(dest)}'>Continue</a></p>").encode("utf-8"))
+            else:
+                self._send(200, b"<!doctype html><meta charset=utf-8><script>window.close()</script>"
+                                b"<p style='font:16px -apple-system;padding:40px'>That period could not be read. Close this tab and check the VAT Reclaim tab.</p>")
+            return
         elif self.path == "/read":
             do_read()
         elif self.path == "/reveal":
